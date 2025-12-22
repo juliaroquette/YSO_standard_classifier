@@ -1,0 +1,103 @@
+# =========================================================
+#  CATALOGS TO REMOVE FROM SED PROCESSING PIPELINE
+# =========================================================
+
+
+# ---------------------------------------------------------
+# 1. Outdated / superseded / redundant catalogs
+#    These surveys have newer versions or contain data already
+#    included through other catalogs (e.g., Gaia–2MASS combos,
+#    old UKIDSS releases, obsolete WISE catalogs, etc.)
+# ---------------------------------------------------------
+
+outdated_surveys:
+
+  # WISE / unWISE / CatWISE / AllWISE redundancy
+  # AllWISE and CatWISE are left
+  - II/311/wise
+  - II/360/catalog          # Gábor’s Gaia DR3 vs WISE test catalog
+  - II/363/unwise
+  - II/307/wise
+
+  # Gabor's list
+  - II/371/des_dr2
+  - J/ApJ/836/34/table2
+  - J/ApJ/848/97/sample
+  - J/ApJS/207/10/table5
+  - II/368/sstsl2
+  - I/320/spm4
+  - I/360/syntphot
+  - IV/38/tic
+  - I/305/out
+  - I/340/ucac5
+
+  # 2MASS + related
+  - II/281/2mass6x
+  - VII/233/xsc
+  - II/241/out
+
+  # Old Gaia releases
+  - I/337/gaia
+  - I/350/gaiaedr3
+  - I/345/gaia2
+  - J/A+A/608/A148/x2mass      # Gaia + 2MASS combination (redundant)
+
+  # VHS (old / mixed releases)
+  - II/359/vhs_dr4   # VHS DR5 is included 
+
+  # UKIDSS older releases
+  - II/316/gps6
+  - II/319/las9
+  - II/319/gcs9
+  - II/319/dxs9
+  - II/310/las
+  - II/314/las8
+  - II/314/gcs8
+  - II/314/dxs8
+
+  # Pan-STARRS
+  # - II/349/ps1                 # DR1 (only remove if desired)
+
+  # Other compilations
+  - J/ApJ/867/105/refcat2
+  - J/ApJ/722/1226/table2
+  - J/MNRAS/375/1220/ic348
+
+
+# ---------------------------------------------------------
+# 2. Weird / problematic surveys
+#    These contain unusual or unreliable photometry, light curves,
+#    X-ray, UV, or mixed catalogs unintentionally included by VizieR.
+# @juliaroquette or @gabormarton identified this by inspecting SEDs.
+# ---------------------------------------------------------
+
+weird_surveys:
+
+  - V/154/sdss16                # SDSS DR16 (possible LC-only data)
+  - I/353/gsc242                # GSC with many non-stellar sources
+  - J/ApJS/160/319/coup         # X-ray (COUP)
+  - IV/39/tic82                 # Old TESS Input Catalog
+  - II/339/uvotssc              # UVOT SSC older releases
+  - II/378/xmmom6s              # XMM OM (various)
+  - II/356/xmmom41s
+  - II/340/xmmom2_1
+  - II/370/xmmom5s
+  - II/339/uvotssc1
+
+  # Gaia+2MASS combos again 
+  - J/AJ/161/234/table1
+  - J/AJ/161/234/table2
+  - J/AJ/161/234/table3
+  - J/AJ/161/234/table4
+  - J/AJ/161/234/table5
+  - J/AJ/161/234/table6
+  - J/AJ/161/234/table7
+  - J/AJ/161/234/table8
+
+
+# ---------------------------------------------------------
+# 3. User-defined additional surveys to skip
+#    This can be added to remove more surveys
+# ---------------------------------------------------------
+
+custom_skip: []
