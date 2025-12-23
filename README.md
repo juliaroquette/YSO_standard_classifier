@@ -64,7 +64,9 @@ will save a file `./output/raw/V1547Ori.csv` with the SED data queried from Vizi
 
 Next, a list of extra processing steps is available:
 
+TO DO ...
 
-References:
+## Additional examples:
 
-"""
+- Full example of querying, processing and fitting $\alpha_{IR}$ for one source can be found in [this notebook](./scripts/query_one_source.ipynb).
+- A full example of how to build a script to download data for several sources (from an input file) and output their $\alpha_{IR}$ can be found in [this script](./scripts/get_sed_and_classify.py)
