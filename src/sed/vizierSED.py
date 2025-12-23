@@ -435,19 +435,32 @@ class Source:
         """
         if self.sed is None:
             return
-        if 'sed_filter' not in self.sed.columns:
+        if "sed_filter" not in self.sed.columns:
             return
-        # Accept single string or a collection
-        if isinstance(tabname, str):
-            mask = self.sed["_tabname"] != tabname
+
+        col = self.sed["sed_filter"].astype(str)
+
+        # Single value
+        if isinstance(sed_filter, str):
+            mask = col != sed_filter
+
+        # Iterable of values
         else:
-            # tabname is iterable: drop any in the list/set
-            tabset = {str(t) for t in tabname if t is not None}
-            if not tabset:
+            try:
+                filtset = {str(f) for f in sed_filter if f is not None}
+            except TypeError:
+                # Non-iterable non-string (e.g. a single number) -> treat as single
+                filtset = {str(sed_filter)}
+
+            if not filtset:
                 return
-            mask = ~self.sed["_tabname"].astype(str).isin(tabset)
+
+            mask = ~col.isin(filtset)
 
         self.sed = self.sed.loc[mask].reset_index(drop=True)
+
+        if len(self.sed) == 0:
+            self.sed = None
 
     def mergeRepeatedPoints(self, tol_arcsec=0.01, flux_tol_frac=1e-5):
         """

@@ -10,7 +10,7 @@ from tqdm import trange
 
 from sed.vizierSED import Source
 from sed.config_blacklist import load_black_list, apply_blacklist
-from sed.classifyYSO import YSOClassifier   # <-- adjust to your final location
+from sed.classifyYSO import YSOClassifier   
 
 
 def main(
@@ -103,12 +103,13 @@ def main(
         if star.sed is None:
             continue
 
+        apply_blacklist(star, blacklist_config, keys=blacklist_keys)
+
         # ---- Optional post-processing steps ----
-        star.keep_wavelength_range(2., 24.)
+        star.keep_wavelength_range(.5, 50.)
         star.resolveMultipleDetections()
         star.mergeRepeatedPoints(tol_arcsec=0.1, flux_tol_frac=1e-3)
         star.aggregateFilter()
-        apply_blacklist(star, blacklist_config, keys=blacklist_keys)
 
         # ---- Alpha_IR classification (NEW) ----
         if save_alpha_table:

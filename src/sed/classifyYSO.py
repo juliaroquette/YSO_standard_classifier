@@ -30,8 +30,9 @@ from astropy.constants import c
 from scipy import optimize
 from scipy.optimize import Bounds
 
+import inspect
+import textwrap
 
-#
 # Using classification rules adopted in Roquette et al. 2025, A&A, 702, A63 Table 1. 
 #
 DEFAULT_RULES = {
@@ -42,6 +43,24 @@ DEFAULT_RULES = {
     "III no disk / MS": lambda a: np.isfinite(a) and (a < -2.5),
 }
 
+
+def print_rules(rules=DEFAULT_RULES):
+    for label, fn in rules.items():
+        desc = None
+        try:
+            # May fail in notebooks, interactive sessions, or if source is unavailable
+            src = inspect.getsource(fn).strip()
+            src = " ".join(src.split())  # collapse whitespace
+            desc = src
+        except Exception:
+            # Fallback: show file/line info
+            try:
+                code = fn.__code__
+                desc = f"<lambda at {code.co_filename}:{code.co_firstlineno}>"
+            except Exception:
+                desc = "<unprintable rule>"
+
+        print(f"{label:16s}: {desc}")
 
 def apply_rules(alpha, rules):
     for label, pred in rules.items():
@@ -235,36 +254,134 @@ class YSOClassifier(object):
             "class": self.yso_class,
         }
 
-    def plot(self, ax=None, savepath=None, dpi=150, show_fit=True):
+    def plot(
+        self,
+        ax=None,
+        savepath=None,
+        dpi=150,
+        show_fit=True,
+        *,
+        overlay_sed=None,          # (sed_lambda_um, sed_flux_jy, sed_eflux_jy)
+        overlay_color="0.7",       # gray
+        overlay_alpha=0.8,
+        overlay_ms=2.5,
+        overlay_zorder=0,
+        inrange_color="tab:red",   # NEW: color for points within [lower, upper]
+        base_color="0.3",          # NEW: color for all points (background layer)
+    ):
+        import numpy as np
+        import matplotlib.pyplot as plt
+        import astropy.units as u
+        from astropy.constants import c
+
         if ax is None:
             fig, ax = plt.subplots(figsize=(4, 4), dpi=dpi)
         else:
             fig = ax.figure
 
-        mask = (
-            np.isfinite(self.lambda_um) & np.isfinite(self.nuFnu) & np.isfinite(self.enuFnu) &
-            (self.lambda_um > 0) & (self.nuFnu > 0) &
-            (self.lambda_um > self.lower) & (self.lambda_um < self.upper)
+        # ------------------------------------------------------------
+        # Optional overlay: raw Source SED arrays (lambda_um, flux_jy, eflux_jy)
+        # Convert to nuFnu in cgs so it matches the y-axis.
+        # ------------------------------------------------------------
+        if overlay_sed is not None:
+            if len(overlay_sed) != 3:
+                raise ValueError(
+                    "overlay_sed must be a 3-tuple: (sed_lambda, sed_flux, sed_eflux)"
+                )
+
+            sed_lambda_um = np.asarray(overlay_sed[0], dtype=float)
+            sed_flux_jy   = np.asarray(overlay_sed[1], dtype=float)
+            sed_eflux_jy  = np.asarray(overlay_sed[2], dtype=float)
+
+            m0 = (
+                np.isfinite(sed_lambda_um) & (sed_lambda_um > 0) &
+                np.isfinite(sed_flux_jy) & (sed_flux_jy >= 0) &
+                np.isfinite(sed_eflux_jy) & (sed_eflux_jy > 0)
+            )
+
+            if np.any(m0):
+                lam0 = sed_lambda_um[m0]
+                f0   = sed_flux_jy[m0]
+                ef0  = sed_eflux_jy[m0]
+
+                # sort for nicer visuals
+                idx0 = np.argsort(lam0)
+                lam0, f0, ef0 = lam0[idx0], f0[idx0], ef0[idx0]
+
+                # astropy quantities
+                lam_q = lam0 * u.um
+                nu_q  = (c / lam_q).to(u.Hz)
+                fnu_q = f0  * u.Jy
+                efnu_q = ef0 * u.Jy
+
+                # nuFnu in cgs flux units
+                nuFnu_q  = (nu_q * fnu_q).to(u.erg / u.s / u.cm**2)
+                enuFnu_q = (nu_q * efnu_q).to(u.erg / u.s / u.cm**2)
+
+                ax.errorbar(
+                    lam0,
+                    nuFnu_q.value,
+                    yerr=enuFnu_q.value,
+                    fmt=".",
+                    ms=overlay_ms,
+                    elinewidth=0.6,
+                    capsize=1.5,
+                    color=overlay_color,
+                    alpha=overlay_alpha,
+                    zorder=overlay_zorder,
+                )
+
+        # ------------------------------------------------------------
+        # Main data
+        # ------------------------------------------------------------
+        lam = np.asarray(self.lambda_um, dtype=float)
+        y = np.asarray(self.nuFnu, dtype=float)
+        ey = np.asarray(self.enuFnu, dtype=float)
+
+        finite = (
+            np.isfinite(lam) & np.isfinite(y) & np.isfinite(ey) &
+            (lam > 0) & (y > 0) & (ey > 0)
         )
 
+        in_range = finite & (lam > self.lower) & (lam < self.upper)
+
+        # Base layer: all finite points (neutral)
         ax.errorbar(
-            self.lambda_um, self.nuFnu, yerr=self.enuFnu,
-            fmt=".", ms=3.5, elinewidth=0.75, capsize=2
+            lam[finite], y[finite], yerr=ey[finite],
+            fmt=".", ms=3.5, elinewidth=0.75, capsize=2,
+            color=base_color,
+            ecolor=base_color,
+            zorder=2,
         )
 
-        if np.any(mask):
-            ax.scatter(self.lambda_um[mask], self.nuFnu[mask], s=10)
+        # Highlight: points within [lower, upper] in tab:red
+        if np.any(in_range):
+            ax.scatter(
+                lam[in_range], y[in_range],
+                s=12,
+                color=inrange_color,
+                zorder=3,
+            )
 
+        # Fit overlay
         if show_fit and np.isfinite(self.alpha_ir) and np.isfinite(self.intercept):
             wl_grid = np.logspace(np.log10(0.5), np.log10(1000), 200)
-            ax.plot(wl_grid, _powerlaw(wl_grid, self.alpha_ir, self.intercept), ls="--", lw=1)
+            ax.plot(
+                wl_grid,
+                _powerlaw(wl_grid, self.alpha_ir, self.intercept),
+                ls="--",
+                lw=1,
+                zorder=4,
+            )
 
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.set_xlabel(r"$\lambda\ (\mu m)$")
         ax.set_ylabel(r"$\nu F_{\nu}\ (erg\ s^{-1}\ cm^{-2})$")
 
-        ax.set_title("alpha={0:.2f} | {1} | N={2}".format(self.alpha_ir, self.yso_class, self.n_points))
+        ax.set_title(
+            "alpha={0:.2f} | {1} | N={2}".format(self.alpha_ir, self.yso_class, self.n_points)
+        )
 
         ax.axvspan(0.5, self.lower, alpha=0.1)
         ax.axvspan(self.lower, self.upper, alpha=0.15)
@@ -274,6 +391,8 @@ class YSOClassifier(object):
             fig.savefig(savepath, dpi=dpi, bbox_inches="tight")
 
         return ax
+
+
 
 class SimpleSource(object):
     """
