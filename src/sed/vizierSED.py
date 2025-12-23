@@ -426,7 +426,17 @@ class Source:
             return
         if 'sed_filter' not in self.sed.columns:
             return
-        self.sed = self.sed[self.sed['sed_filter'] != sed_filter].reset_index(drop=True)
+        # Accept single string or a collection
+        if isinstance(tabname, str):
+            mask = self.sed["_tabname"] != tabname
+        else:
+            # tabname is iterable: drop any in the list/set
+            tabset = {str(t) for t in tabname if t is not None}
+            if not tabset:
+                return
+            mask = ~self.sed["_tabname"].astype(str).isin(tabset)
+
+        self.sed = self.sed.loc[mask].reset_index(drop=True)
 
     def mergeRepeatedPoints(self, tol_arcsec=0.01, flux_tol_frac=1e-5):
         """
@@ -662,87 +672,3 @@ class Source:
         df = df.drop(to_remove).reset_index(drop=True)
 
         self.sed = df
-
-    def remove_outdated(self):
-        if self.sed is None or '_tabname' not in self.sed.columns:
-            return
-        if not self.black_list:
-            return
-
-        skip = self.black_list.get("outdated_surveys", [])
-        self.sed = self.sed[~self.sed['_tabname'].isin(skip)].reset_index(drop=True)
-
-
-    def remove_weird(self):
-        if self.sed is None or '_tabname' not in self.sed.columns:
-            return
-        if not self.black_list:
-            return
-
-        skip = self.black_list.get("weird_surveys", [])
-        self.sed = self.sed[~self.sed['_tabname'].isin(skip)].reset_index(drop=True)
-
-
-    def remove_custom(self):
-        if self.sed is None or '_tabname' not in self.sed.columns:
-            return
-        if not self.black_list:
-            return
-        skip = self.black_list.get("custom_skip", [])
-        self.sed = self.sed[~self.sed['_tabname'].isin(skip)].reset_index(drop=True)
-
-
-def load_black_list(config_dir, filename="skip_surveys_list.yaml"):
-    """
-    Load survey skip configuration from a YAML file.
-
-    Parameters
-    ----------
-    config_dir : str
-        Directory where the blacklist YAML is expected to live.
-    filename : str
-        Name of the YAML file.
-
-    Returns
-    -------
-    dict with keys:
-      - outdated_surveys
-      - weird_surveys
-      - custom_skip
-    """
-    config_path = os.path.join(config_dir, filename)
-
-    try:
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f) or {}
-            tqdm.write(f"[INFO] Loaded survey blacklist: {config_path}")
-
-    except FileNotFoundError:
-        tqdm.write(
-            "\n"
-            "#############################################\n"
-            "[WARNING] Survey blacklist NOT FOUND\n"
-            f"  Expected at: {config_path}\n"
-            "  → No surveys will be removed\n"
-            "#############################################\n"
-        )
-        config = {}
-
-    except Exception as e:
-        tqdm.write(
-            "\n"
-            "#############################################\n"
-            "[WARNING] Failed to read survey blacklist\n"
-            f"  Path: {config_path}\n"
-            f"  Error: {e}\n"
-            "  → No surveys will be removed\n"
-            "#############################################\n"
-        )
-        config = {}
-
-    # Always return a valid schema
-    config.setdefault("outdated_surveys", [])
-    config.setdefault("weird_surveys", [])
-    config.setdefault("custom_skip", [])
-
-    return config
