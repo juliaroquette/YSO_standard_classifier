@@ -26,6 +26,7 @@ with basic processing to remove invalid points, and converted to wavelength in m
 
 
 import os
+from turtle import color
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -36,6 +37,7 @@ from tqdm import tqdm
 import astropy.constants as const
 import yaml
 from astropy.constants import c as c_light
+from matplotlib.patches import Circle
 
 class Source:
     def __init__(self, ra, dec, radius,
@@ -127,8 +129,6 @@ class Source:
         if self.raw_cache_dir is not None and self.sed is not None:
             self.save(self.raw_cache_dir, suffix="_raw")
 
-
-
     def _baseFilename(self):
         """
         Define base filename for the source SED file.
@@ -178,7 +178,6 @@ class Source:
                 
         self.sed = sed
 
-
     def save(self, out_dir, *, suffix):
         """
         Save the current state of the SED to disk.
@@ -199,7 +198,6 @@ class Source:
         out_file = os.path.join(out_dir, fname)
 
         self.sed.to_csv(out_file, index=False)
-
 
     def __toDataframe(self):
         """
@@ -397,15 +395,28 @@ class Source:
         Reduce the searching radius to a radius r (arcseconds)
         around the central coordinate.
         """
-        self.r_confine = r
+        self.r_confine = float(r)
 
         if self.sed is None:
             return
+
+        # Need distances to apply the cut
         if "dist_to_center" not in self.sed.columns:
             self.__computeCoordDistance()
-            if self.sed is None or "dist_to_center" not in self.sed.columns:
+            if self.sed is None:
                 return
 
+        # If we still cannot compute distances (e.g. no per-point coords), do nothing
+        if "dist_to_center" not in self.sed.columns:
+            return
+
+        # Apply filtering
+        m = np.isfinite(self.sed["dist_to_center"]) & (self.sed["dist_to_center"] <= self.r_confine)
+        self.sed = self.sed.loc[m].reset_index(drop=True)
+
+        # If nothing left, match your conventions
+        if len(self.sed) == 0:
+            self.sed = None
 
     def dropCatalog(self, tabname):
         """
@@ -709,7 +720,7 @@ class Source:
 
         return lam, flux, eflux
 
-    def plot_sed(self, ax=None, *, use_confine=True, y="flux", show=True, **kwargs):
+    def plot_sed(self, ax=None, *, y="flux", show=True, **kwargs):
         """
         Makes a quick plot of a SED
 
@@ -720,7 +731,7 @@ class Source:
             nuFnu -> plot nu * Fnu
         """
 
-        lam, flux, eflux = self.get_plot_arrays(use_confine=use_confine)
+        lam, flux, eflux = self.get_plot_arrays()
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(6.5, 4.0), dpi=150)
@@ -752,4 +763,88 @@ class Source:
 
         if show:
             plt.show()
+        return ax
+    
+    def plot_measurement_positions(
+        self,
+        ax=None,
+        *,
+        dpi=150,
+        show=True,
+        radius_arcsec=None,
+        show_confine=True,
+    ):
+        """
+        Plot the sky positions of SED measurements relative to the Source center.
+
+        - Points: (_RAJ2000, _DEJ2000)
+        - Center: '+' at (0, 0)
+        - Circle: search radius (self.r) in arcsec (or radius_arcsec if provided)
+
+        Uses small-angle approximation:
+            x = ΔRA * cos(dec0)  [arcsec]
+            y = ΔDec            [arcsec]
+        """
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(2.5, 2.5), dpi=dpi)
+        else:
+            fig = ax.figure
+
+        if self.sed is None or len(self.sed) == 0:
+            ax.text(0.5, 0.5, "No SED data", ha="center", va="center", transform=ax.transAxes)
+            if show:
+                plt.show()
+            return ax
+
+        # Must have per-point coordinates
+        if ("_RAJ2000" not in self.sed.columns) or ("_DEJ2000" not in self.sed.columns):
+            ax.text(
+                0.5, 0.5,
+                "No per-point coordinates (_RAJ2000/_DEJ2000) in SED.",
+                ha="center", va="center", transform=ax.transAxes
+            )
+            if show:
+                plt.show()
+            return ax
+
+        ra0 = float(self.ra)
+        dec0 = float(self.dec)
+
+        ra = self.sed["_RAJ2000"].to_numpy(dtype=float)
+        dec = self.sed["_DEJ2000"].to_numpy(dtype=float)
+
+        m = np.isfinite(ra) & np.isfinite(dec)
+        ra, dec = ra[m], dec[m]
+
+        # offsets in arcsec (small-angle approx)
+        cosd = np.cos(np.deg2rad(dec0))
+        dx = (ra - ra0) * cosd * 3600.0   # arcsec
+        dy = (dec - dec0) * 3600.0        # arcsec
+
+        ax.scatter(dx, dy, s=12, zorder=2, alpha=0.6, color="tab:red")
+        ax.plot(0.0, 0.0, marker="+", ms=14, mew=2, zorder=3, color="tab:blue", alpha=0.75)
+
+        r_search = float(self.r) if radius_arcsec is None else float(radius_arcsec)
+        ax.add_patch(Circle((0.0, 0.0), r_search, fill=False, lw=1.2, ls=":", zorder=1))
+
+        # optional: show the confine radius too (dashed), if set
+        if show_confine and (self.r_confine is not None):
+            ax.add_patch(Circle((0.0, 0.0), float(self.r_confine), fill=False, lw=1.2, ls=":", zorder=1))
+
+        ax.set_aspect("equal", adjustable="datalim")
+        ax.set_xlabel(r"$\Delta \alpha \cos\delta$ (arcsec)")
+        ax.set_ylabel(r"$\Delta \delta$ (arcsec)")
+
+        title = str(self.internal_id) if self.internal_id is not None else f"{ra0:.5f}, {dec0:.5f}"
+        ax.set_title(f"{title}  |  r={r_search:.2f} arcsec")
+
+        # make sure the circle is visible even if points are all near the center
+        pad = 1.1 * r_search
+        ax.set_xlim(-pad, pad)
+        ax.set_ylim(-pad, pad)
+
+        if show:
+            plt.show()
+
         return ax
