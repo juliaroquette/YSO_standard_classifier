@@ -1,22 +1,22 @@
 """
 @juliaroquette 22 December 2025:
 
-This is an adaptation of David 
+This is an adaptation of David Hernandez code: https://github.com/Starvexx/standard_classification
+YSOClassifier has now been tailored to be fed directly a Source instance with the data received from VizieR-SED.
 
-YSO infrared spectral index (alpha_IR) classifier operating on a Source instance.
-
-Assumptions about Source
-------------------------
-Source.sed is a pandas DataFrame with columns:
     - "sed_lambda"  (micrometers)
     - "sed_flux"    (Jy)   = F_nu
     - "sed_eflux"   (Jy)   = sigma(F_nu)
 
-This module:
+Alternatively, if one wants to use external data, the source_from_arrays function can be used to mimic the Source class.
+src = source_from_arrays(lam, flux, eflux, ID="V1547Ori")
+
+YSOClassifier can estimate YSO infrared spectral index (alpha_IR). It assumes:
+-  data is provided as F_nu in Jy at given wavelengths in micrometers.
 - converts F_nu (Jy) -> nu*F_nu (erg/s/cm^2) using astropy units
-- fits log10(nuFnu) vs log10(lambda) with a 2-step procedure (as in your old classify.py)
+- fits log10(nuFnu) vs log10(lambda) with a 2-step procedure 
 - returns alpha_ir, intercept, wl_min/max, n_points, class label
-- allows custom classification schemes via a dict of rules
+- allows custom classification schemes using a dictionary with rules
 - can plot the SED + fit
 
 """
@@ -31,9 +31,9 @@ from scipy import optimize
 from scipy.optimize import Bounds
 
 
-# -----------------------------------------------------------------------------
-# Classification schemes
-# -----------------------------------------------------------------------------
+#
+# Using classification rules adopted in Roquette et al. 2025, A&A, 702, A63 Table 1. 
+#
 DEFAULT_RULES = {
     "0/I": lambda a: np.isfinite(a) and (a > 0.3),
     "flat": lambda a: np.isfinite(a) and (-0.3 < a < 0.3),
@@ -51,9 +51,13 @@ def apply_rules(alpha, rules):
 
 
 # -----------------------------------------------------------------------------
-# Unit-safe conversion: Jy (F_nu) -> nu*F_nu (erg/s/cm^2)
+# Unit-safe conversion: 
 # -----------------------------------------------------------------------------
 def jy_to_nuFnu(lambda_um, fnu_jy):
+    """ 
+    Converts flux density into flux
+    Jy (F_nu) -> nu*F_nu (erg/s/cm^2)
+    """
     lam = np.asarray(lambda_um, dtype=float)
     fnu = np.asarray(fnu_jy, dtype=float)
 
@@ -72,6 +76,9 @@ def jy_to_nuFnu(lambda_um, fnu_jy):
 
 
 def jyerr_to_nuFnu_err(lambda_um, efnu_jy):
+    """
+    propagates flux density errors to nu*F_nu errors
+    """
     lam = np.asarray(lambda_um, dtype=float)
     efnu = np.asarray(efnu_jy, dtype=float)
 
@@ -89,19 +96,27 @@ def jyerr_to_nuFnu_err(lambda_um, efnu_jy):
     return out
 
 
-# -----------------------------------------------------------------------------
-# Fitting: alpha and intercept
-# -----------------------------------------------------------------------------
 def _line(x, k, d):
+    """
+    Simple Linear model to be used with curve_fit
+    """
     return k * x + d
 
 
 def _powerlaw(lam_um, k, d):
+    """
+    Power-law model to be used with curve_fit
+    """
     lam_um = np.asarray(lam_um, dtype=float)
     return 10.0 ** (k * np.log10(lam_um) + d)
 
 
 def fit_alpha(lambda_um, nuFnu, enuFnu, lower=2.0, upper=24.0, min_points=2, wl_span_threshold_um=2.0):
+    """
+    Fit the infrared spectral index alpha_IR using a 2-step fitting procedure. 
+    Fits first a linear model in log-log space, then refines with a power-law fit. 
+    (Makes sure things won't go crazy with bounds from the first fit.)
+    """
     lam = np.asarray(lambda_um, dtype=float)
     f = np.asarray(nuFnu, dtype=float)
     ef = np.asarray(enuFnu, dtype=float)
@@ -150,19 +165,23 @@ def fit_alpha(lambda_um, nuFnu, enuFnu, lower=2.0, upper=24.0, min_points=2, wl_
         return np.nan, np.nan, np.nan, np.nan, n
 
 
-# -----------------------------------------------------------------------------
-# Main class
-# -----------------------------------------------------------------------------
 class YSOClassifier(object):
-    def __init__(self, source, lower=2.0, upper=24.0, min_points=2, wl_span_threshold_um=2.0,
-                 rules=None, debug=False):
+    """
+    Class to classify YSOs based on their infrared spectral index (alpha_IR).
+    """
+    def __init__(self, source, # should be a vizierSED Source instance 
+                 lower=2.0, # minimum wavelength in micrometers for fit
+                 upper=24.0, # maximum wavelength in micrometers for fit
+                 min_points=2, # minimum number of points required for fit
+                 wl_span_threshold_um=2.0, # minimum wavelength span required for fit
+                 rules=None, # classification rules to apply -  If not provided, use DEFAULT_RULES
+                 ):
         self.source = source
         self.lower = float(lower)
         self.upper = float(upper)
         self.min_points = int(min_points)
         self.wl_span_threshold_um = float(wl_span_threshold_um)
         self.rules = DEFAULT_RULES if rules is None else rules
-        self.debug = bool(debug)
 
         if source.sed is None:
             raise ValueError("YSOClassifier: source.sed is None (no SED data).")
@@ -255,3 +274,44 @@ class YSOClassifier(object):
             fig.savefig(savepath, dpi=dpi, bbox_inches="tight")
 
         return ax
+
+class SimpleSource(object):
+    """
+    This is a class that allows to mimic a Source class with external input data. 
+    It will recreate the minimal expected structure for a Source from vizierSED
+    """
+    def __init__(self, sed, ID=None, ra=None, dec=None):
+        self.sed = sed
+        self.ID = ID
+        self.ra = ra
+        self.dec = dec
+
+
+def source_from_arrays(sed_lambda, sed_flux, sed_eflux, ID=None, ra=None, dec=None):
+    """
+    Build a minimal Source-like object from three arrays.
+
+    Parameters
+    ----------
+    sed_lambda : array-like, micrometers
+    sed_flux   : array-like, Jy
+    sed_eflux  : array-like, Jy
+
+    Returns
+    -------
+    SimpleSource instance mimicking a Source from vizierSED.py
+    """
+    lam = np.asarray(sed_lambda, dtype=float)
+    flx = np.asarray(sed_flux, dtype=float)
+    eflx = np.asarray(sed_eflux, dtype=float)
+
+    if not (lam.shape == flx.shape == eflx.shape):
+        raise ValueError("source_from_arrays: sed_lambda, sed_flux, sed_eflux must have the same shape.")
+
+    sed = pd.DataFrame({
+        "sed_lambda": lam,
+        "sed_flux": flx,
+        "sed_eflux": eflx,
+    })
+
+    return SimpleSource(sed, ID=ID, ra=ra, dec=dec)
