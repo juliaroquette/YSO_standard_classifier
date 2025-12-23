@@ -35,7 +35,7 @@ import astropy.units as u
 from tqdm import tqdm
 import astropy.constants as const
 import yaml
-
+from astropy.constants import c as c_light
 
 class Source:
     def __init__(self, ra, dec, radius,
@@ -672,3 +672,84 @@ class Source:
         df = df.drop(to_remove).reset_index(drop=True)
 
         self.sed = df
+
+    def get_plot_arrays(self, *, drop_nonfinite=True):
+        """
+        At any given state of Source, this will return the current version of the SED relevant fields:
+        sed_lambda, sed_flux, sed_eflux <- returns the three as numpy arrays.
+
+        """
+        if self.sed is None or len(self.sed) == 0:
+            return np.array([]), np.array([]), np.array([])
+
+        df = self.sed
+
+        # Required columns
+        required = ("sed_lambda", "sed_flux", "sed_eflux")
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            raise KeyError(f"Missing required SED columns: {missing}")
+
+        lam = df["sed_lambda"].to_numpy(dtype=float)
+        flux = df["sed_flux"].to_numpy(dtype=float)
+        eflux = df["sed_eflux"].to_numpy(dtype=float)
+
+        if drop_nonfinite:
+            m = (
+                np.isfinite(lam) & (lam > 0) &
+                np.isfinite(flux) & (flux >= 0) &
+                np.isfinite(eflux) & (eflux > 0)
+            )
+            lam, flux, eflux = lam[m], flux[m], eflux[m]
+
+        # Sort by wavelength
+        if lam.size > 1:
+            idx = np.argsort(lam)
+            lam, flux, eflux = lam[idx], flux[idx], eflux[idx]
+
+        return lam, flux, eflux
+
+    def plot_sed(self, ax=None, *, use_confine=True, y="flux", show=True, **kwargs):
+        """
+        Makes a quick plot of a SED
+
+        Parameters
+        ----------
+        y : {"flux", "nuFnu"}
+            flux -> plot sed_flux (Jy)
+            nuFnu -> plot nu * Fnu
+        """
+
+        lam, flux, eflux = self.get_plot_arrays(use_confine=use_confine)
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(6.5, 4.0), dpi=150)
+
+        if lam.size == 0:
+            ax.text(0.5, 0.5, "No SED data", ha="center", va="center", transform=ax.transAxes)
+            if show:
+                plt.show()
+            return ax
+
+        if y == "nuFnu":
+            # nu = c / lambda
+            nu = (c_light.value) / (lam * 1e-6)  # Hz (lam in um)
+            yy = nu * flux
+            yerr = nu * eflux if np.all(np.isfinite(eflux)) else None
+            ax.set_ylabel(r"$\nu F_\nu$ (Hz·Jy)")
+        else:
+            yy = flux
+            yerr = eflux if np.all(np.isfinite(eflux)) else None
+            ax.set_ylabel(r"$F_\nu$ (Jy)")
+
+        ax.errorbar(lam, yy, yerr=yerr, fmt="o", ms=4, lw=1, capsize=2, **kwargs)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel(r"$\lambda\ (\mu m)$")
+
+        title = str(self.internal_id) if self.internal_id is not None else f"{self.ra:.5f}, {self.dec:.5f}"
+        ax.set_title(title)
+
+        if show:
+            plt.show()
+        return ax
